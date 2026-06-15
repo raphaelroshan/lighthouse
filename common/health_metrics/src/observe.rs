@@ -25,14 +25,20 @@ impl Observe for Health {
     }
 }
 
-impl Observe for SystemHealth {
-    #[cfg(not(target_os = "linux"))]
-    fn observe() -> Result<Self, String> {
-        Err("Health is only available on Linux".into())
+impl SystemHealth {
+    /// Observe system health, reporting disk usage for the given path
+    /// instead of the root filesystem. Falls back to "/" if the path
+    /// is not provided.
+    #[cfg(target_os = "linux")]
+    pub fn observe_with_datadir(datadir: Option<&std::path::Path>) -> Result<Self, String> {
+        let disk_path = datadir
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "/".to_string());
+        Self::observe_impl(&disk_path)
     }
 
     #[cfg(target_os = "linux")]
-    fn observe() -> Result<Self, String> {
+    fn observe_impl(disk_path: &str) -> Result<Self, String> {
         let vm = psutil::memory::virtual_memory()
             .map_err(|e| format!("Unable to get virtual memory: {:?}", e))?;
         let loadavg =
@@ -41,7 +47,7 @@ impl Observe for SystemHealth {
         let cpu =
             psutil::cpu::cpu_times().map_err(|e| format!("Unable to get cpu times: {:?}", e))?;
 
-        let disk_usage = psutil::disk::disk_usage("/")
+        let disk_usage = psutil::disk::disk_usage(disk_path)
             .map_err(|e| format!("Unable to disk usage info: {:?}", e))?;
 
         let disk = psutil::disk::DiskIoCountersCollector::default()
@@ -85,6 +91,18 @@ impl Observe for SystemHealth {
             misc_node_boot_ts_seconds: boot_time,
             misc_os: std::env::consts::OS.to_string(),
         })
+    }
+}
+
+impl Observe for SystemHealth {
+    #[cfg(not(target_os = "linux"))]
+    fn observe() -> Result<Self, String> {
+        Err("Health is only available on Linux".into())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn observe() -> Result<Self, String> {
+        Self::observe_impl("/")
     }
 }
 

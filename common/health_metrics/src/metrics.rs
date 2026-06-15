@@ -124,7 +124,12 @@ pub static BOOT_TIME: LazyLock<Result<IntGauge>> = LazyLock::new(|| {
 
 pub fn scrape_health_metrics() {
     scrape_process_health_metrics();
-    scrape_system_health_metrics();
+    scrape_system_health_metrics(None);
+}
+
+pub fn scrape_health_metrics_with_datadir(datadir: Option<&std::path::Path>) {
+    scrape_process_health_metrics();
+    scrape_system_health_metrics(datadir);
 }
 
 pub fn scrape_process_health_metrics() {
@@ -139,10 +144,23 @@ pub fn scrape_process_health_metrics() {
     }
 }
 
-pub fn scrape_system_health_metrics() {
+pub fn scrape_system_health_metrics(datadir: Option<&std::path::Path>) {
     // This will silently fail if we are unable to observe the health. This is desired behaviour
     // since we don't support `Health` for all platforms.
-    if let Ok(health) = SystemHealth::observe() {
+    let health_result = match datadir {
+        Some(_) => {
+            #[cfg(target_os = "linux")]
+            {
+                SystemHealth::observe_with_datadir(datadir)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                SystemHealth::observe()
+            }
+        }
+        None => SystemHealth::observe(),
+    };
+    if let Ok(health) = health_result {
         set_gauge(&SYSTEM_VIRT_MEM_TOTAL, health.sys_virt_mem_total as i64);
         set_gauge(
             &SYSTEM_VIRT_MEM_AVAILABLE,
