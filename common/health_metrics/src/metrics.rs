@@ -2,6 +2,7 @@ use crate::observe::Observe;
 use eth2::lighthouse::{ProcessHealth, SystemHealth};
 use metrics::*;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub static PROCESS_NUM_THREADS: LazyLock<Result<IntGauge>> = LazyLock::new(|| {
     try_create_int_gauge(
@@ -27,8 +28,8 @@ pub static PROCESS_SHR_MEM: LazyLock<Result<IntGauge>> = LazyLock::new(|| {
         "Shared memory used by the current process",
     )
 });
-pub static PROCESS_SECONDS: LazyLock<Result<IntGauge>> = LazyLock::new(|| {
-    try_create_int_gauge(
+pub static PROCESS_SECONDS: LazyLock<Result<IntCounter>> = LazyLock::new(|| {
+    try_create_int_counter(
         "process_cpu_seconds_total",
         "Total cpu time taken by the current process",
     )
@@ -122,6 +123,10 @@ pub static BOOT_TIME: LazyLock<Result<IntGauge>> = LazyLock::new(|| {
     )
 });
 
+/// Tracks the previous value of `pid_process_seconds_total` so we can compute
+/// the delta to increment the counter by.
+static PREV_PROCESS_CPU_SECONDS: AtomicU64 = AtomicU64::new(0);
+
 pub fn scrape_health_metrics() {
     scrape_process_health_metrics();
     scrape_system_health_metrics();
@@ -135,7 +140,9 @@ pub fn scrape_process_health_metrics() {
         set_gauge(&PROCESS_RES_MEM, health.pid_mem_resident_set_size as i64);
         set_gauge(&PROCESS_VIRT_MEM, health.pid_mem_virtual_memory_size as i64);
         set_gauge(&PROCESS_SHR_MEM, health.pid_mem_shared_memory_size as i64);
-        set_gauge(&PROCESS_SECONDS, health.pid_process_seconds_total as i64);
+        let current = health.pid_process_seconds_total;
+        let prev = PREV_PROCESS_CPU_SECONDS.swap(current, Ordering::Relaxed);
+        inc_counter_by(&PROCESS_SECONDS, current.saturating_sub(prev));
     }
 }
 
